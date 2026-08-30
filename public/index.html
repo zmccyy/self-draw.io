@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>智绘 AI · Diagram Studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2322d3ee'/%3E%3Cstop offset='1' stop-color='%237c3aed'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Ccircle cx='9' cy='9' r='3' fill='white'/%3E%3Ccircle cx='23' cy='16' r='3' fill='white'/%3E%3Ccircle cx='9' cy='23' r='3' fill='white'/%3E%3Cpath d='M11 10.5 20.5 15M20.5 17.5 11 21.5' stroke='white' stroke-width='1.6' fill='none'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="bg-glow" aria-hidden="true"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">
+      <svg viewBox="0 0 32 32" width="19" height="19" fill="none">
+        <circle cx="9" cy="9" r="3" fill="#fff"></circle>
+        <circle cx="23" cy="16" r="3" fill="#fff"></circle>
+        <circle cx="9" cy="23" r="3" fill="#fff"></circle>
+        <path d="M11 10.5 20.5 15M20.5 17.5 11 21.5" stroke="#fff" stroke-width="1.6"></path>
+      </svg>
+    </div>
+    <div class="brand-text">
+      <span class="brand-name">智绘 AI</span>
+      <span class="brand-sub">DIAGRAM STUDIO</span>
+    </div>
+  </div>
+
+  <div class="top-status">
+    <div class="pill" id="pill-editor" title="draw.io 引擎连接状态">
+      <span class="dot" id="editor-dot"></span><span id="editor-text">编辑器连接中…</span>
+    </div>
+    <div class="pill pill-model" id="pill-model" title="AI 模型">
+      <span class="pill-spark">✦</span><span id="model-text">—</span>
+    </div>
+    <div class="pill" id="pill-xml" title="当前画布 XML 体积">XML <b id="xml-size">0</b> KB</div>
+  </div>
+
+  <div class="top-actions">
+    <button class="btn" id="btn-new" title="新建空白画布">＋ 新建</button>
+    <button class="btn" id="btn-undo" title="撤销上一次 AI 应用">↩ 撤销</button>
+    <button class="btn" id="btn-history" title="版本历史（自动存档）">🕘 历史</button>
+    <span class="v-sep"></span>
+    <button class="btn" id="btn-copy" title="复制高清 PNG 到剪贴板，Word 中 Ctrl+V 直接粘贴">⧉ 复制</button>
+    <button class="btn" id="btn-png" title="导出高清 PNG（约300DPI）">PNG</button>
+    <button class="btn" id="btn-svg" title="导出矢量 SVG（论文排版推荐，无限缩放不失真）">SVG</button>
+    <button class="btn" id="btn-xml" title="导出为 .drawio 源文件">XML</button>
+    <span class="v-sep"></span>
+    <button class="btn btn-thesis" id="btn-thesis" title="论文模式：灰阶 / 字体 / 风格 / 图注编号">🎓 论文</button>
+  </div>
+</header>
+
+<main id="main">
+  <section class="canvas-wrap">
+    <iframe id="drawio-frame" src="about:blank" title="draw.io 编辑器"></iframe>
+    <div class="canvas-loading" id="canvas-loading">
+      <div class="loader-logo">
+        <svg viewBox="0 0 32 32" width="46" height="46" fill="none">
+          <circle cx="9" cy="9" r="3" fill="#22d3ee"></circle>
+          <circle cx="23" cy="16" r="3" fill="#7c3aed"></circle>
+          <circle cx="9" cy="23" r="3" fill="#22d3ee"></circle>
+          <path d="M11 10.5 20.5 15M20.5 17.5 11 21.5" stroke="#64748b" stroke-width="1.6"></path>
+        </svg>
+      </div>
+      <div class="loader-text">正在启动 draw.io 本地引擎…</div>
+      <div class="loader-bar"><span></span></div>
+      <div class="loader-tip">首次加载需编译本地源码资源，约 5~15 秒</div>
+    </div>
+    <div class="canvas-chip" id="canvas-chip">⚡ draw.io 引擎 · 本地运行 · 可手动编辑</div>
+  </section>
+
+  <div class="divider" id="divider" title="拖动调整面板宽度"></div>
+
+  <aside class="ai-panel" id="ai-panel">
+    <div class="panel-head">
+      <div class="panel-title"><span class="panel-title-icon">✦</span>AI 绘图助手</div>
+      <button class="icon-btn" id="btn-clear" title="清空对话">🗑</button>
+    </div>
+
+    <div class="chat" id="chat">
+      <div class="empty" id="empty-state">
+        <div class="empty-logo">
+          <svg viewBox="0 0 32 32" width="52" height="52" fill="none">
+            <circle cx="9" cy="9" r="3" fill="#22d3ee"></circle>
+            <circle cx="23" cy="16" r="3" fill="#7c3aed"></circle>
+            <circle cx="9" cy="23" r="3" fill="#22d3ee"></circle>
+            <path d="M11 10.5 20.5 15M20.5 17.5 11 21.5" stroke="#475569" stroke-width="1.6"></path>
+          </svg>
+        </div>
+        <h1>一句话，画出专业图表</h1>
+        <p class="empty-sub">DeepSeek V4 Pro 驱动 · 生成可编辑的 draw.io 图形</p>
+        <div class="chip-tabs">
+          <button class="tab active" data-tab="general">通用图表</button>
+          <button class="tab" data-tab="academic">🎓 学术论文</button>
+        </div>
+        <div class="chips" id="chips-general">
+          <button class="chip" data-p="画一个电商订单处理流程图：用户下单、支付校验、库存扣减、出库发货，支付失败走重试分支"><span class="chip-icon">📊</span><span class="chip-body"><b>订单流程图</b><i>含失败重试分支</i></span></button>
+          <button class="chip" data-p="画一个典型电商微服务架构图：客户端、网关、用户/订单/商品/支付服务、MySQL、Redis、消息队列，按层分区"><span class="chip-icon">🏗️</span><span class="chip-body"><b>微服务架构图</b><i>分层容器布局</i></span></button>
+          <button class="chip" data-p="以「产品发布会」为中心画一张思维导图，包含宣传推广、场地布置、嘉宾邀约、物料准备四大分支，每个分支再展开2-3个子项"><span class="chip-icon">🧠</span><span class="chip-body"><b>发布会思维导图</b><i>中心辐射展开</i></span></button>
+          <button class="chip" data-p="画一个用户登录的时序图：用户、前端、认证服务、数据库四个参与者，包含校验密码、返回token的完整消息流"><span class="chip-icon">⏱️</span><span class="chip-body"><b>登录时序图</b><i>四参与者交互</i></span></button>
+          <button class="chip" data-p="画一个简单的电商数据库ER图：用户、订单、商品、订单明细四个实体，标注字段和1:n关系"><span class="chip-icon">🗄️</span><span class="chip-body"><b>数据库 ER 图</b><i>实体与关系</i></span></button>
+          <button class="chip" data-p="画一个敏捷开发团队的组织架构图：产品负责人、Scrum Master、开发组（前端2人、后端3人）、测试组（2人）"><span class="chip-icon">👥</span><span class="chip-body"><b>团队组织架构</b><i>树状层次结构</i></span></button>
+        </div>
+        <div class="chips" id="chips-academic" style="display:none">
+          <button class="chip" data-p="画一张毕业设计技术路线图：需求分析→总体方案设计→详细设计与开发→系统测试→实验验证→论文撰写，阶段自上而下排列，若实验验证不通过则用虚线箭头反馈回总体方案设计并标注「方案修正」"><span class="chip-icon">🧭</span><span class="chip-body"><b>技术路线图</b><i>阶段递进+反馈回路</i></span></button>
+          <button class="chip" data-p="画一个B/S三层系统架构图用于毕业论文系统设计章节：表示层（浏览器/Web前端）、业务逻辑层（Web服务器、业务服务模块）、数据访问层（DAO/ORM）、数据层（MySQL、Redis），各层用虚线容器分区，层间自上而下连线"><span class="chip-icon">🏗️</span><span class="chip-body"><b>系统三层架构图</b><i>B/S 分层设计</i></span></button>
+          <button class="chip" data-p="画一个冒泡排序算法的流程图，符号符合国标/ISO流程图规范：开始（圆角）、输入待排序数组（平行四边形）、外层循环、内层循环比较相邻元素（判断菱形）、交换、输出有序数组（平行四边形）、结束（圆角）"><span class="chip-icon">🔀</span><span class="chip-body"><b>算法流程图</b><i>ISO 规范符号</i></span></button>
+          <button class="chip" data-p="画一张深度学习模型实验流程图：数据采集→数据预处理（清洗、归一化）→划分训练/验证/测试集→模型训练→超参数调优（不达标虚线回到模型训练）→测试评估→结果分析"><span class="chip-icon">🧪</span><span class="chip-body"><b>实验流程图</b><i>含调参迭代回路</i></span></button>
+          <button class="chip" data-p="画一个CNN图像分类网络结构图：输入层(224×224×3)→卷积层Conv(64个3×3核)→池化层MaxPool→卷积层Conv(128)→池化层MaxPool→全连接层FC→Softmax输出层，各层从左到右排列，层间连线标注数据尺寸变化"><span class="chip-icon">🧬</span><span class="chip-body"><b>网络结构图</b><i>CNN 分层结构</i></span></button>
+          <button class="chip" data-p="画一张毕业设计进度甘特图，共6个月：文献调研（第1-2月）、系统设计（第2-3月）、编码实现（第3-5月）、实验测试（第4-5月）、论文撰写（第5-6月），顶部为月份表头，每行一个任务，任务时间段用圆角矩形精确对齐时间列"><span class="chip-icon">📅</span><span class="chip-body"><b>进度甘特图</b><i>6个月研究计划</i></span></button>
+        </div>
+        <div class="feat-row"><span>流程图</span><i></i><span>架构图</span><i></i><span>思维导图</span><i></i><span>时序图</span><i></i><span>ER 图</span></div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="composer-box">
+        <textarea id="input" rows="1" placeholder="描述你想画的图，如：画一个电商订单处理的流程图…"></textarea>
+        <button id="btn-send" class="send-btn" title="发送 (Enter)">➤</button>
+      </div>
+      <div class="composer-meta">
+        <label class="switch-wrap" title="生成后立即替换画布内容">
+          <input type="checkbox" id="auto-apply" checked>
+          <span class="switch"></span>
+          <span>自动应用到画布</span>
+        </label>
+        <span class="hint">Enter 发送 · Shift+Enter 换行</span>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<div id="toasts"></div>
+
+<!-- 论文模式设置弹窗 -->
+<div class="modal-overlay" id="thesis-modal" hidden>
+  <div class="modal">
+    <div class="modal-head"><span class="modal-title">🎓 论文模式设置</span><button class="icon-btn" id="thesis-close" title="关闭">✕</button></div>
+    <div class="modal-body">
+      <div class="set-row">
+        <div class="set-info"><b>论文灰阶模式</b><p>黑白打印友好：按亮度分档转灰阶、深底自动反白，AI 应用时自动转换</p></div>
+        <label class="switch-wrap"><input type="checkbox" id="opt-gray"><span class="switch"></span></label>
+      </div>
+      <div class="set-row">
+        <div class="set-info"><b>图内字体</b><p>统一写入全部图形样式，保证全文图表字体一致</p></div>
+        <select id="opt-font" class="sel">
+          <option value="">默认字体</option>
+          <option value="SimSun">宋体 SimSun</option>
+          <option value="SimHei">黑体 SimHei</option>
+          <option value="KaiTi">楷体 KaiTi</option>
+          <option value="FangSong">仿宋 FangSong</option>
+          <option value="Times New Roman">Times New Roman</option>
+        </select>
+      </div>
+      <div class="set-row">
+        <div class="set-info"><b>全局风格</b><p>统一字号、线宽与圆角，保证全文图表风格一致</p></div>
+        <select id="opt-theme" class="sel">
+          <option value="">默认风格</option>
+          <option value="standard">论文标准（14号字 / 2px线 / 直角）</option>
+          <option value="defense">答辩投屏（16号字 / 2px线 / 圆角）</option>
+        </select>
+      </div>
+      <div class="modal-divider"></div>
+      <div class="fig-sec">
+        <div class="fig-head"><b>图注与编号</b><span class="muted">按章节自动编号，导出文件名携带编号</span></div>
+        <div class="fig-form">
+          <span class="fig-label">第</span><input id="fig-prefix" class="inp inp-sm" placeholder="3"><span class="fig-label">章 · 图</span>
+          <input id="fig-title" class="inp" placeholder="图标题，如：系统总体架构">
+        </div>
+        <div class="fig-form">
+          <button class="btn btn-primary" id="fig-add">＋ 记录当前图</button>
+          <button class="btn" id="fig-copy-catalog" title="复制为论文可用的图目录清单">⧉ 复制图目录</button>
+        </div>
+        <div class="fig-list" id="fig-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 版本历史弹窗 -->
+<div class="modal-overlay" id="history-modal" hidden>
+  <div class="modal">
+    <div class="modal-head"><span class="modal-title">🕘 版本历史</span><button class="icon-btn" id="history-close" title="关闭">✕</button></div>
+    <div class="modal-body">
+      <div class="snap-tip">每次 AI 应用与手动保存都会落盘存档（服务端 snapshots/ 目录，最多 100 份）</div>
+      <div class="fig-form"><button class="btn btn-primary" id="snap-save">📌 保存当前画布为快照</button><button class="btn" id="snap-refresh">⟳ 刷新</button></div>
+      <div class="snap-list" id="snap-list"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/thesis.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>

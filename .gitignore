@@ -1,0 +1,15 @@
+# 环境与本地数据（不入库）
+.env
+snapshots/
+node_modules/
+.v2c/
+*.log
+
+# draw.io 官方引擎源码（约231MB，克隆仓库后执行：
+#   git clone --depth 1 https://github.com/jgraph/drawio.git drawio-src
+# 或直接运行 start.bat 自动获取）
+drawio-src/
+
+# 系统文件
+Thumbs.db
+.DS_Store
