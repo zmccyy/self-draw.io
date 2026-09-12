@@ -46,6 +46,7 @@
     <button class="btn" id="btn-svg" title="导出矢量 SVG（论文排版推荐，无限缩放不失真）">SVG</button>
     <button class="btn" id="btn-xml" title="导出为 .drawio 源文件">XML</button>
     <span class="v-sep"></span>
+    <button class="btn" id="btn-code" title="读码绘图：扫描本机代码库，AI 生成架构图">📂 读码</button>
     <button class="btn btn-thesis" id="btn-thesis" title="论文模式：灰阶 / 字体 / 风格 / 图注编号">🎓 论文</button>
   </div>
 </header>
@@ -88,7 +89,7 @@
           </svg>
         </div>
         <h1>一句话，画出专业图表</h1>
-        <p class="empty-sub">DeepSeek V4 Pro 驱动 · 生成可编辑的 draw.io 图形</p>
+        <p class="empty-sub">DeepSeek V4.1 Flash 驱动 · 生成可编辑的 draw.io 图形</p>
         <div class="chip-tabs">
           <button class="tab active" data-tab="general">通用图表</button>
           <button class="tab" data-tab="academic">🎓 学术论文</button>
@@ -129,6 +130,57 @@
     </div>
   </aside>
 </main>
+
+<!-- 读码绘图向导 -->
+<div class="modal-overlay" id="cb-modal" hidden>
+  <div class="modal modal-lg">
+    <div class="modal-head"><span class="modal-title">📂 读码绘图 · 从代码库生成架构图</span><button class="icon-btn" id="cb-close" title="关闭">✕</button></div>
+    <div class="cb-steps">
+      <div class="cb-step active" data-step="1"><i>1</i><span>选择代码库</span></div>
+      <div class="cb-arrow">→</div>
+      <div class="cb-step" data-step="2"><i>2</i><span>勾选文件范围</span></div>
+      <div class="cb-arrow">→</div>
+      <div class="cb-step" data-step="3"><i>3</i><span>确认并生成</span></div>
+    </div>
+    <div class="modal-body">
+      <div class="cb-pane" id="cb-pane-1">
+        <p class="cb-hint">输入本机项目文件夹的完整路径。扫描会自动忽略 node_modules、.git、dist 等目录，只保留源码与配置文件，全程不上传任何内容。</p>
+        <div class="fig-form">
+          <input id="cb-path" class="inp" placeholder="例如：E:\projects\my-graduation-project" spellcheck="false">
+          <button class="btn btn-primary" id="cb-scan">扫描</button>
+        </div>
+        <div class="cb-scan-status" id="cb-scan-status"></div>
+      </div>
+
+      <div class="cb-pane" id="cb-pane-2" style="display:none">
+        <div class="cb-toolbar">
+          <input id="cb-intent" class="inp" placeholder="绘图意图（可选），如：画用户模块的架构，突出登录流程" spellcheck="false">
+          <button class="btn" id="cb-ai-pick" title="AI 根据意图推荐应勾选的文件（只发送路径清单，不读取文件内容）">✦ AI 圈选</button>
+        </div>
+        <div class="cb-tree" id="cb-tree"></div>
+        <div class="cb-selbar">
+          <span id="cb-sel-stats">已选 0 个文件 · 0 KB</span>
+          <span class="cb-budget" id="cb-budget"></span>
+          <button class="mini-btn" id="cb-select-rec" title="恢复为启发式推荐的默认勾选">恢复推荐勾选</button>
+          <button class="mini-btn" id="cb-select-none">全不选</button>
+        </div>
+      </div>
+
+      <div class="cb-pane" id="cb-pane-3" style="display:none">
+        <div class="cb-confirm" id="cb-confirm"></div>
+        <label class="cb-check">
+          <input type="checkbox" id="cb-agree">
+          <span>我已知晓：以上<b>文件内容</b>将发送到 DeepSeek API 用于分析并生成图表</span>
+        </label>
+        <button class="btn btn-primary btn-block" id="cb-generate" disabled>🚀 生成架构图</button>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="cb-prev" disabled>← 上一步</button>
+      <button class="btn btn-primary" id="cb-next">下一步 →</button>
+    </div>
+  </div>
+</div>
 
 <div id="toasts"></div>
 

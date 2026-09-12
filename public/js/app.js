@@ -371,16 +371,17 @@ function resendLast() {
 
 /* ---------------- 发送 / SSE ---------------- */
 
-async function send(text, isRetry) {
-  text = (text != null ? text : input.value).trim();
-  if (!text || state.streaming) return;
-  if (!isRetry) {
-    hideEmpty();
-    addMsgUser(text);
+function computeSnapLabel() {
+  for (let i = state.history.length - 1; i >= 0; i--) {
+    if (state.history[i].role === 'user') return state.history[i].content.slice(0, 24);
   }
-  state.history.push({ role: 'user', content: text });
-  input.value = '';
-  autoGrow();
+  return 'AI 应用';
+}
+
+/* 通用助手回合：聊天与读码绘图共用（SSE 消费 + 消息渲染 + 自动应用） */
+async function runAssistantTurn({ endpoint, body, displayText, snapLabel, showUser = true }) {
+  if (state.streaming) { toast('正在生成中，请稍候…', 'warn'); return; }
+  if (showUser) { hideEmpty(); addMsgUser(displayText); }
 
   const ctx = addStreamingAI();
   setStreaming(true);
@@ -389,11 +390,6 @@ async function send(text, isRetry) {
   let acc = '';
   let firstDelta = false;
   let doneData = null;
-  // 快照标签：取本轮用户指令前24字
-  let snapLabel = 'AI 应用';
-  for (let i = state.history.length - 1; i >= 0; i--) {
-    if (state.history[i].role === 'user') { snapLabel = state.history[i].content.slice(0, 24); break; }
-  }
 
   const handleSSE = (evt) => {
     if (!evt || !evt.type) return;
@@ -417,10 +413,10 @@ async function send(text, isRetry) {
   };
 
   try {
-    const resp = await fetch('/api/chat', {
+    const resp = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: state.history.slice(0, -1).concat([{ role: 'user', content: text }]), currentXml: state.currentXml }),
+      body: JSON.stringify(body),
       signal: ctrl.signal,
     });
     if (!resp.ok || !resp.body) throw new Error('服务端 HTTP ' + resp.status);
@@ -471,6 +467,22 @@ async function send(text, isRetry) {
       toast('自动应用出错：' + (applyErr.message || applyErr), 'err');
     }
   }
+}
+
+async function send(text, isRetry) {
+  text = (text != null ? text : input.value).trim();
+  if (!text || state.streaming) return;
+  if (!isRetry) hideEmpty();
+  state.history.push({ role: 'user', content: text });
+  input.value = '';
+  autoGrow();
+  await runAssistantTurn({
+    endpoint: '/api/chat',
+    body: { messages: state.history, currentXml: state.currentXml },
+    displayText: text,
+    snapLabel: computeSnapLabel(),
+    showUser: !isRetry,
+  });
 }
 
 /* ---------------- 输入框 ---------------- */
@@ -724,6 +736,243 @@ document.querySelectorAll('.chip-tabs .tab').forEach((t) => {
   });
 });
 
+/* ---------------- 读码绘图向导 ---------------- */
+const cb = { root: '', files: [], byteMap: {}, selected: new Set(), step: 1, scanning: false, suggesting: false, dirBoxes: [] };
+const CB_BUDGET = 500 * 1024;
+
+function cbStep(n) {
+  cb.step = n;
+  [1, 2, 3].forEach((i) => {
+    document.getElementById('cb-pane-' + i).style.display = i === n ? '' : 'none';
+    const s = document.querySelector('.cb-step[data-step="' + i + '"]');
+    s.classList.toggle('active', i === n);
+    s.classList.toggle('done', i < n);
+  });
+  document.getElementById('cb-prev').disabled = n === 1;
+  const next = document.getElementById('cb-next');
+  next.style.display = n === 3 ? 'none' : '';
+  next.disabled = (n === 1 && !cb.root) || (n === 2 && !cb.selected.size);
+  if (n === 3) renderCbConfirm();
+}
+
+function buildFsTree(files) {
+  const root = { dirs: new Map(), files: [] };
+  for (const f of files) {
+    const parts = f.path.split('/');
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], { dirs: new Map(), files: [] });
+      node = node.dirs.get(parts[i]);
+    }
+    node.files.push({ name: parts[parts.length - 1], path: f.path, bytes: f.bytes, recommended: f.recommended });
+  }
+  return root;
+}
+
+function collectDirFiles(node, out) {
+  out = out || [];
+  node.files.forEach((f) => out.push(f.path));
+  node.dirs.forEach((child) => collectDirFiles(child, out));
+  return out;
+}
+
+function refreshTreeChecks() {
+  document.querySelectorAll('#cb-tree input[data-path]').forEach((cbx) => {
+    cbx.checked = cb.selected.has(cbx.dataset.path);
+  });
+}
+
+function updateDirStates() {
+  cb.dirBoxes.forEach(({ el, paths }) => {
+    const sel = paths.filter((p) => cb.selected.has(p)).length;
+    el.checked = sel === paths.length && paths.length > 0;
+    el.indeterminate = sel > 0 && sel < paths.length;
+  });
+}
+
+function updateSelStats() {
+  const paths = [...cb.selected];
+  const bytes = paths.reduce((s, p) => s + (cb.byteMap[p] || 0), 0);
+  document.getElementById('cb-sel-stats').textContent = '已选 ' + paths.length + ' 个文件 · ' + (bytes / 1024).toFixed(1) + ' KB';
+  const budget = document.getElementById('cb-budget');
+  if (bytes > CB_BUDGET) {
+    budget.className = 'cb-budget';
+    budget.textContent = '⚠ 超出 500KB 预算，生成时将自动裁剪';
+  } else {
+    budget.className = 'cb-budget ok';
+    budget.textContent = '预算内（≤ 500KB）';
+  }
+  if (cb.step === 2) document.getElementById('cb-next').disabled = !paths.length;
+}
+
+function renderCbTree() {
+  const box = document.getElementById('cb-tree');
+  box.innerHTML = '';
+  cb.dirBoxes = [];
+  const tree = buildFsTree(cb.files);
+
+  const mkFile = (f, container) => {
+    const row = document.createElement('label');
+    row.className = 'cb-file' + (f.recommended ? ' rec' : '');
+    const cbx = document.createElement('input');
+    cbx.type = 'checkbox';
+    cbx.dataset.path = f.path;
+    cbx.checked = cb.selected.has(f.path);
+    cbx.addEventListener('change', () => {
+      if (cbx.checked) cb.selected.add(f.path); else cb.selected.delete(f.path);
+      updateDirStates(); updateSelStats();
+    });
+    row.appendChild(cbx);
+    const name = document.createElement('span');
+    name.textContent = f.name;
+    row.appendChild(name);
+    if (f.recommended) { const star = document.createElement('span'); star.className = 'rec-star'; star.textContent = '★'; row.appendChild(star); }
+    const size = document.createElement('span');
+    size.className = 'size';
+    size.textContent = f.bytes >= 1024 ? (f.bytes / 1024).toFixed(1) + 'K' : f.bytes + 'B';
+    row.appendChild(size);
+    container.appendChild(row);
+  };
+
+  const mkDir = (name, node, container) => {
+    const det = document.createElement('details');
+    det.className = 'cb-dir';
+    const sum = document.createElement('summary');
+    const cbx = document.createElement('input');
+    cbx.type = 'checkbox';
+    const paths = collectDirFiles(node);
+    cb.dirBoxes.push({ el: cbx, paths });
+    cbx.addEventListener('change', () => {
+      paths.forEach((p) => (cbx.checked ? cb.selected.add(p) : cb.selected.delete(p)));
+      refreshTreeChecks(); updateSelStats();
+    });
+    sum.appendChild(cbx);
+    const nm = document.createElement('span');
+    nm.textContent = name + '/';
+    sum.appendChild(nm);
+    det.appendChild(sum);
+    const children = document.createElement('div');
+    children.className = 'cb-children';
+    node.dirs.forEach((child, cname) => mkDir(cname, child, children));
+    node.files.forEach((f) => mkFile(f, children));
+    det.appendChild(children);
+    container.appendChild(det);
+  };
+
+  tree.dirs.forEach((node, name) => mkDir(name, node, box));
+  tree.files.forEach((f) => mkFile(f, box));
+  updateDirStates();
+}
+
+function renderCbConfirm() {
+  const paths = [...cb.selected].sort();
+  const bytes = paths.reduce((s, p) => s + (cb.byteMap[p] || 0), 0);
+  const tokens = Math.round(bytes / 3);
+  const cnyLow = (tokens / 1e6 * 0.15 * 7.2).toFixed(2);
+  const cnyHigh = (tokens / 1e6 * 0.3 * 7.2).toFixed(2);
+  const box = document.getElementById('cb-confirm');
+  box.innerHTML =
+    '将发送 <b>' + paths.length + '</b> 个文件（共 ' + (bytes / 1024).toFixed(1) + ' KB ≈ ' +
+    (tokens / 10000).toFixed(1) + ' 万 token，费用约 ¥' + cnyLow + ' ~ ' + cnyHigh + '）' +
+    (bytes > CB_BUDGET ? '<div class="cf-warn">⚠ 超出 500KB 预算，发送时将按勾选顺序自动裁剪</div>' : '') +
+    '<div class="cf-list">' + paths.slice(0, 15).map((p) => '· ' + escapeHtml(p)).join('<br>') +
+    (paths.length > 15 ? '<br>· …等共 ' + paths.length + ' 个文件' : '') + '</div>';
+  document.getElementById('cb-agree').checked = false;
+  document.getElementById('cb-generate').disabled = true;
+}
+
+$('#btn-code').addEventListener('click', () => { cbStep(cb.root ? cb.step : 1); openModal('cb-modal'); });
+$('#cb-close').addEventListener('click', () => closeModal('cb-modal'));
+$('#cb-prev').addEventListener('click', () => cbStep(Math.max(1, cb.step - 1)));
+$('#cb-next').addEventListener('click', () => {
+  if (cb.step === 2 && !cb.selected.size) return toast('请至少勾选一个文件，或使用「AI 圈选」', 'warn');
+  cbStep(Math.min(3, cb.step + 1));
+});
+$('#cb-path').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#cb-scan').click(); });
+
+$('#cb-scan').addEventListener('click', async () => {
+  if (cb.scanning) return;
+  const root = document.getElementById('cb-path').value.trim().replace(/^["']|["']$/g, '');
+  if (!root) return toast('请输入文件夹路径', 'warn');
+  cb.scanning = true;
+  const st = document.getElementById('cb-scan-status');
+  st.className = 'cb-scan-status';
+  st.textContent = '扫描中…';
+  try {
+    const r = await (await fetch('/api/codebase/scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ root }),
+    })).json();
+    if (r.error) { st.className = 'cb-scan-status err'; st.textContent = r.error; return; }
+    cb.root = r.root;
+    cb.files = r.files;
+    cb.byteMap = {};
+    r.files.forEach((f) => { cb.byteMap[f.path] = f.bytes; });
+    cb.selected = new Set(r.files.filter((f) => f.recommended).map((f) => f.path));
+    st.className = 'cb-scan-status ok';
+    st.textContent = '✓ 扫描完成：' + r.fileCount + ' 个文件，忽略 ' + r.ignoredDirs + ' 个目录，★ 推荐 ' + r.recommendedCount + ' 个（已默认勾选）';
+    renderCbTree();
+    updateSelStats();
+    document.getElementById('cb-next').disabled = false;
+  } catch (e) {
+    st.className = 'cb-scan-status err';
+    st.textContent = '扫描失败：' + e.message;
+  } finally {
+    cb.scanning = false;
+  }
+});
+
+$('#cb-ai-pick').addEventListener('click', async () => {
+  if (cb.suggesting) return;
+  if (!cb.files.length) return toast('请先扫描代码库', 'warn');
+  cb.suggesting = true;
+  const btn = document.getElementById('cb-ai-pick');
+  btn.textContent = '✦ 圈选中…';
+  try {
+    const r = await (await fetch('/api/codebase/suggest', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intent: document.getElementById('cb-intent').value.trim(), paths: cb.files.map((f) => f.path) }),
+    })).json();
+    if (r.error) { toast(r.error, 'err'); return; }
+    r.paths.forEach((p) => cb.selected.add(p));
+    refreshTreeChecks(); updateDirStates(); updateSelStats();
+    toast(r.paths.length ? 'AI 推荐勾选 ' + r.paths.length + ' 个文件，可继续调整' : 'AI 没有给出推荐，请手动勾选', r.paths.length ? 'ok' : 'warn');
+  } catch (e) {
+    toast('圈选失败：' + e.message, 'err');
+  } finally {
+    cb.suggesting = false;
+    btn.textContent = '✦ AI 圈选';
+  }
+});
+
+$('#cb-select-rec').addEventListener('click', () => {
+  cb.selected = new Set(cb.files.filter((f) => f.recommended).map((f) => f.path));
+  refreshTreeChecks(); updateDirStates(); updateSelStats();
+});
+$('#cb-select-none').addEventListener('click', () => {
+  cb.selected.clear();
+  refreshTreeChecks(); updateDirStates(); updateSelStats();
+});
+document.getElementById('cb-agree').addEventListener('change', (e) => {
+  document.getElementById('cb-generate').disabled = !e.target.checked;
+});
+
+$('#cb-generate').addEventListener('click', () => {
+  const intent = document.getElementById('cb-intent').value.trim();
+  const paths = [...cb.selected].sort();
+  if (!paths.length) return toast('未选择任何文件', 'warn');
+  const rootName = cb.root.split(/[\\/]/).filter(Boolean).pop() || cb.root;
+  const displayText = '【读码绘图】' + (intent || '生成整体模块架构图') + '（' + rootName + ' · ' + paths.length + ' 个文件）';
+  closeModal('cb-modal');
+  hideEmpty();
+  state.history.push({ role: 'user', content: displayText });
+  runAssistantTurn({
+    endpoint: '/api/codebase/generate',
+    body: { root: cb.root, paths, intent },
+    displayText,
+    snapLabel: '读码绘图·' + (intent || '架构图').slice(0, 14),
+  });
+});
+
 /* ---------------- Toast ---------------- */
 
 function toast(text, type) {
@@ -750,5 +999,5 @@ function toast(text, type) {
   // 30s 未就绪提示
   setTimeout(() => { if (!state.ready) toast('编辑器加载较慢，请检查网络或刷新页面', 'warn'); }, 30000);
   // 调试/测试句柄
-  window.__zhenhui = { state, thesis, applyXml, transformXml };
+  window.__zhenhui = { state, thesis, applyXml, transformXml, cb };
 })();

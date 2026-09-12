@@ -33,6 +33,7 @@
 | 📑 图注编号 | 按章节自动编号（图3-1、图3-2…），一键复制图目录清单，导出文件名自动携带编号与标题 |
 | 📤 矢量导出 | SVG（论文排版推荐）/ 高清 PNG（scale=3 ≈300 DPI）/ `.drawio` 源文件 / 一键复制 PNG 到剪贴板（Word 中 Ctrl+V 直接粘贴） |
 | 🧪 学术模板 | 技术路线图 / 系统三层架构 / 算法流程图（ISO 规范符号）/ 实验流程 / 神经网络结构 / 进度甘特图，另有 6 个通用模板 |
+| 📂 读码绘图 | 说不清需求？直接扫本机代码库：启发式推荐文件 + AI 圈选（只传路径不读内容）+ 发送前确认清单，从真实代码生成架构图（单图 ≤30 节点，超大系统自动拆分） |
 | ↩️ 一键撤销 | 撤销上一次 AI 应用（独立撤销栈，与画布内部撤销互不干扰） |
 | 🔄 实时同步 | draw.io `autosave` 事件持续回传画布状态，手动拖拽微调后 AI 下一轮自动基于新状态修改 |
 | 🛡️ 可靠生成 | 服务端 XML 校验与自动修复（未转义 `&`、value 内裸 `<`、缺失 0/1 图层节点等），不合格自动带错误信息重试一次 |
@@ -70,6 +71,16 @@ node server.js
 4. **导出插图**：**SVG**（Word 2016+ / LaTeX 矢量排版首选）或 **⧉ 复制**（剪贴板直贴 Word）；文件名形如 `图3-1_系统总体架构.svg`
 5. **管理版本**：每次 AI 应用已自动存档；「🕘 历史」可载入任意历史版本，写作全程可回滚
 6. **正文引用**：「⧉ 复制图目录」得到 `图3-1 ×××` 清单，与论文图注一一对应
+
+## 📂 读码绘图工作流
+
+说不清想要什么图？让 AI 直接读你的代码：
+
+1. 顶栏「📂 读码」→ 输入本机项目路径（如 `E:\projects\my-graduation-project`）→ 扫描（自动忽略 node_modules/.git/dist 等）
+2. 文件树中勾选范围：启发式推荐文件（入口/配置/模型/路由/依赖清单，标★）已默认勾选；拿不准就点「✦ AI 圈选」输入意图（如"画用户模块"），AI 只根据**路径清单**推荐勾选，不读取文件内容
+3. Step3 确认清单（发送 N 个文件 / X KB / token 与费用估算）→ 勾选知情同意 → 生成
+
+预算与安全：单次发送上限 500KB（单文件 100KB 截断保头部，超出自动裁剪并明示）；生成图走统一管线（论文模式变换、版本历史快照、导出）；基于 DeepSeek V4 1M 上下文，`deepseek-flash` 单次读码生成通常 10~40 秒。
 
 ## 🏗️ 架构与工作原理
 
@@ -133,7 +144,7 @@ draw.io/
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `DEEPSEEK_API_KEY` | — | DeepSeek API Key（必填） |
-| `DEEPSEEK_MODEL` | `deepseek-v4-pro` | 可改 `deepseek-v4-flash`（快数倍，复杂图质量略降） |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | V4.1-Flash；可改 `deepseek-v4-pro`（复杂图质量优先，价格约4倍） |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | 兼容 OpenAI 协议即可（如换本地 Ollama 网关） |
 | `PORT` | `3210` | 服务端口 |
 | `MAX_TOKENS` | `8192` | 单次生成上限 |
@@ -147,6 +158,9 @@ draw.io/
 | GET | `/api/health` | 健康检查：模型、Key 状态、draw.io 就绪 |
 | GET | `/api/config` | 前端配置：模型名 |
 | POST | `/api/chat` | AI 对话（SSE 流式）：`{messages:[{role,content}], currentXml}` → `meta/delta/notice/think/done/error` 事件 |
+| POST | `/api/codebase/scan` | 扫描本地代码库：`{root}` → 文件清单+启发式推荐+忽略统计 |
+| POST | `/api/codebase/suggest` | AI 圈选：`{intent, paths[]}`（只传路径）→ 建议勾选的路径 |
+| POST | `/api/codebase/generate` | 读码生成（SSE 流式）：`{root, paths[], intent}` → 同 chat 事件协议 |
 | GET | `/api/snapshots` | 快照列表（按时间倒序） |
 | POST | `/api/snapshots` | 保存快照：`{label, xml}`（上限 100 份自动淘汰） |
 | GET | `/api/snapshots/:id` | 读取快照（含完整 XML） |
@@ -157,7 +171,8 @@ draw.io/
 | 想改什么 | 改哪里 |
 |---|---|
 | 新增图表模板 | `public/index.html` 搜索 `chips-academic`，仿照添加 `<button class="chip" data-p="提示词">` |
-| 调整生成规范 / 配色 / 布局策略 | `lib/prompt.js` 的 `SYSTEM_PROMPT`（含模板、硬性规则、学术图表补充规范与 few-shot） |
+| 调整生成规范 / 配色 / 布局策略 | `lib/prompt.js` 的 `SYSTEM_PROMPT` 与 `CODEBASE_SYSTEM_PROMPT`（含模板、硬性规则、学术图表规范与 few-shot） |
+| 调整读码扫描/推荐/预算 | `lib/codebase.js`（忽略目录清单、推荐规则 `RECOMMEND_RULES`、`pickContent` 预算裁剪） |
 | 新增论文变换规则（如线型统一） | `public/js/thesis.js`，在 `enhance()` 管线中追加一步 |
 | 新增导出格式 | `public/js/app.js` 的 `exportDiagram()`；可用格式见 `drawio-src/src/main/webapp/js/diagramly/EditorUi.js` 中 `data.action == 'export'` 分支（png/xmlpng/svg/xml…） |
 | 调整快照保留策略 | `server.js` 的 `handleSnapshots()`（当前保留 100 份） |
@@ -166,7 +181,7 @@ draw.io/
 ## ❓ FAQ
 
 - **画布空白 / 一直在"编辑器连接中"？** 首次加载 draw.io 引擎需 5~15 秒（本地 9.6MB 生产包），之后有浏览器缓存会快很多；仍失败请刷新或检查终端报错。
-- **生成要多久？** `deepseek-v4-pro` 对复杂图会先"深度思考"（面板有计时提示），约 30~180 秒；赶时间切 `deepseek-v4-flash`。
+- **生成要多久？** 默认 `deepseek-flash` 通常 15~60 秒；复杂图想追求更高质量可换 `deepseek-v4-pro`（会先"深度思考"，约 30~180 秒）。
 - **手动编辑后 AI 会覆盖吗？** 不会。手动修改经 autosave 同步，AI 下一轮基于画布最新状态增量修改；关闭「自动应用」可改为手动确认后再上画布。
 - **AI 应用后画布内 Ctrl+Z 失效？** `load` 是整图替换，会重置编辑器内部撤销栈——用应用顶栏的「↩ 撤销」恢复上一版（独立撤销栈，30 步）。
 - **需要联网吗？** 仅大模型 API 需要联网；draw.io 引擎完全本地。涉密内容可将 `DEEPSEEK_BASE_URL` 指向本地 Ollama/vLLM 网关实现全离线。
